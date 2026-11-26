@@ -246,14 +246,20 @@ const store={get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){retu
 const K=Math.cos(15*Math.PI/180),P=p=>[p[0]*K,-p[1]];
 const httpsOnly=location.protocol==='https:';
 const canHLS=!!document.createElement('audio').canPlayType('application/vnd.apple.mpegurl');
-const playable=s=>s.n&&(!httpsOnly||s.u.startsWith('https:'))&&(!s.h||canHLS);
+const playable=s=>s.n&&(!httpsOnly||s.u.startsWith('https:'));
+/* transmissões HLS (.m3u8): Safari toca sozinho; nos outros navegadores entra o hls.js, carregado só quando precisa */
+const isHLS=s=>!!s.h||/\.m3u8(\?|$)/i.test(s.u||'');
+let hls=null,hlsLib=null;
+const loadHls=()=>hlsLib||(hlsLib=new Promise((res,rej)=>{const sc=document.createElement('script');sc.src='https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js';sc.onload=()=>res(window.Hls);sc.onerror=()=>{hlsLib=null;rej()};document.head.appendChild(sc)}));
 const hasGeo=s=>typeof s.la==='number'&&typeof s.lo==='number'&&(s.la||s.lo);
 const matchTerms=(txt,q)=>{const n=' '+norm(txt)+' ';return q.every(t=>n.includes(t))};
 /* emissoras inseridas à mão: nome, faixa, frequência e palavras para achar o link na base */
 const EXTRA={RS:{alegrete:[
   {n:'Nativa FM Alegrete',band:'FM',f:105.9,u:'https://stm6.srvvox.com.br:7016/stream'},
   {n:'104 FM Alegrete',band:'FM',f:104.9,u:'http://srv10.ipstm.net:25234/;'},
-  {n:'Rádio Tchê Alegrete',band:'AM',f:590,u:'https://radio.saopaulo01.com.br:10949/stream'}]}};
+  {n:'Rádio Tchê Alegrete',band:'AM',f:590,u:'https://radio.saopaulo01.com.br:10949/stream'}],
+ 'porto alegre':[
+  {n:'Rádio Gaúcha',band:'FM',f:93.7,u:'https://liverdgaupoa.rbsdirect.com.br/primary/gaucha_rbs.sdp/playlist.m3u8'}]}};
 
 /* ---------- geometria ---------- */
 const rings=g=>g.type==='Polygon'?[g.coordinates]:g.type==='MultiPolygon'?g.coordinates:[];
@@ -446,7 +452,7 @@ function setNoise(l){if(noiseG)noiseG.gain.setTargetAtTime(R.on?l*R.vol*.3:0,ctx
 audio.addEventListener('playing',()=>{aState='playing';paint()});
 audio.addEventListener('waiting',()=>{if(aState==='playing'){aState='loading';paint()}});
 audio.addEventListener('error',()=>{if(!audio.getAttribute('src'))return;aState='error';paint()});
-function stopAudio(){clearTimeout(tuneT);audio.pause();audio.removeAttribute('src');audio.load();aState='idle'}
+function stopAudio(){clearTimeout(tuneT);if(hls){hls.destroy();hls=null}audio.pause();audio.removeAttribute('src');audio.load();aState='idle'}
 const resolving={};
 async function resolveExtra(s){const src=s.src;
   if(!resolving[s.id])resolving[s.id]=(async()=>{for(const base of RB){try{
@@ -458,7 +464,13 @@ async function resolveExtra(s){const src=s.src;
   if(R.cur===s){if(u){R.cur=null;lockTo(s)}else aState='nolink'}renderChips();paint()}
 function lockTo(s){if(s===R.cur)return;R.cur=s;stopAudio();if(!s||!R.on)return;
   if(!s.u){aState=s.pending?'loading':'nolink';return}aState='loading';
-  tuneT=setTimeout(()=>{audio.src=s.u;audio.volume=R.vol;audio.play().catch(()=>{if(R.cur===s&&audio.getAttribute('src')){aState='error';paint()}})},300)}
+  const fail=()=>{if(R.cur===s){aState='error';paint()}};
+  tuneT=setTimeout(async()=>{if(R.cur!==s)return;
+    if(isHLS(s)&&!canHLS){let H;try{H=await loadHls()}catch(e){fail();return}
+      if(R.cur!==s||hls)return;if(!H||!H.isSupported()){fail();return}
+      hls=new H();hls.on(H.Events.ERROR,(ev,d)=>{if(d.fatal)fail()});hls.loadSource(s.u);hls.attachMedia(audio)}
+    else audio.src=s.u;
+    audio.volume=R.vol;audio.play().catch(()=>{if(R.cur===s&&audio.getAttribute('src')&&!hls)fail()})},300)}
 function nearest(f){const B=BANDS[R.band];let best=null,bd=1e9;
   for(const s of R.list)if(s.band===R.band){const d=Math.abs(s.f-f);if(d<bd-1e-9||(Math.abs(d-bd)<1e-9&&s===R.cur)){bd=d;best=s}}
   return bd<=B.cap+1e-9?best:null}
