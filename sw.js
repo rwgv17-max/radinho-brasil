@@ -1,6 +1,6 @@
 // Guarda só a "carcaça" do app (página, ícones, manifesto) para abrir rápido.
 // Mapas, lista de rádios e áudio sempre vêm da internet.
-const CACHE = 'radinho-v1';
+const CACHE = 'radinho-v2';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
 
 self.addEventListener('install', e => {

@@ -466,9 +466,15 @@ function lockTo(s){if(s===R.cur)return;R.cur=s;stopAudio();if(!s||!R.on)return;
   if(!s.u){aState=s.pending?'loading':'nolink';return}aState='loading';
   const fail=()=>{if(R.cur===s){aState='error';paint()}};
   tuneT=setTimeout(async()=>{if(R.cur!==s)return;
-    if(isHLS(s)&&!canHLS){let H;try{H=await loadHls()}catch(e){fail();return}
-      if(R.cur!==s||hls)return;if(!H||!H.isSupported()){fail();return}
-      hls=new H();hls.on(H.Events.ERROR,(ev,d)=>{if(d.fatal)fail()});hls.loadSource(s.u);hls.attachMedia(audio)}
+    let H=null;if(isHLS(s)){try{H=await loadHls()}catch(e){H=null}if(R.cur!==s||hls)return}
+    if(H&&H.isSupported()){
+      /* player dedicado: guarda uns 15 s de folga e tenta se recuperar sozinho antes de desistir */
+      let tries=0;hls=new H({liveSyncDurationCount:3,maxBufferLength:30,backBufferLength:30});
+      hls.on(H.Events.ERROR,(ev,d)=>{if(!d.fatal||!hls)return;if(++tries>3){fail();return}
+        if(d.type===H.ErrorTypes.MEDIA_ERROR)hls.recoverMediaError();else setTimeout(()=>{if(hls)hls.startLoad()},1500)});
+      hls.on(H.Events.FRAG_LOADED,()=>{tries=0});
+      hls.loadSource(s.u);hls.attachMedia(audio)}
+    else if(isHLS(s)&&!canHLS){fail();return}
     else audio.src=s.u;
     audio.volume=R.vol;audio.play().catch(()=>{if(R.cur===s&&audio.getAttribute('src')&&!hls)fail()})},300)}
 function nearest(f){const B=BANDS[R.band];let best=null,bd=1e9;
